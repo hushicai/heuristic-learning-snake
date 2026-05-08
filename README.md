@@ -1,12 +1,18 @@
 # Heuristic Learning Snake
 
-验证 Heuristic Learning 理念的实验项目。用 x-horse-evolve 自主迭代改进贪吃蛇 AI 启发式策略，不依赖神经网络。
+验证 Heuristic Learning 理念的实验项目。
+
+用 x-horse-evolve 自主迭代改进贪吃蛇 AI 启发式策略，不依赖神经网络。
+
+来源：Jiayi Weng, [《Learning Beyond Gradients》](https://trinkle23897.github.io/learning-beyond-gradients/#zh-section-2)（2026）。
+
+原实验使用 Codex 在 Atari/MuJoCo 上验证 HL 理念，本仓库用一个简易贪吃蛇游戏复现其核心循环。
 
 ## 如何使用
 
 ```bash
 # 1. 进入项目目录
-cd ~/data/ai-project/heuristic-learning-snake
+cd /path/to/heuristic-learning-snake
 
 # 2. 查看当前策略的分数（基线）
 .venv/bin/python judge.py
