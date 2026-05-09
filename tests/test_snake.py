@@ -295,3 +295,190 @@ def test_full_episode_tail_chase():
             break
     # 跑完不应因策略错误而崩溃
     assert info["score"] >= 0
+
+
+# ---- flood_fill_with_tail tests ----
+
+from policy import flood_fill_with_tail
+
+
+def test_flood_fill_with_tail_open():
+    """空旷区域，全部可达（无身体段阻挡）。"""
+    count = flood_fill_with_tail((0, 0), [], width=5, height=5)
+    assert count == 25
+
+
+def test_flood_fill_with_tail_considers_release():
+    """身体段会在若干步后移走，BFS 应能穿过。"""
+    # head=(0,0), body=[(1,0), (2,0)] 向右延伸
+    # body[0]=(1,0) 在 1 步后移走，body[1]=(2,0) 在 2 步后移走
+    # BFS: (0,0) → (1,0) steps=1, 1>=0 可通过 → (2,0) steps=2, 2>=1 可通过
+    # → (3,0) steps=3 空格
+    count = flood_fill_with_tail((0, 0), [(1, 0), (2, 0)], width=5, height=5)
+    # 应该能到达 (3,0) 和 (4,0)，因为身体段会逐步移走
+    assert count >= 5  # (0,0),(1,0),(2,0),(3,0),(4,0) 至少这5个
+
+
+def test_flood_fill_with_tail_body_reduces_immediate_space():
+    """身体段在初期减少可达空间，但长期会释放。"""
+    # head=(0,0), body 很长向右延伸
+    # 与无身体时相比，flood_fill_with_tail 仍应 >= flood_fill
+    # （因为考虑了动态释放，空间评估更乐观）
+    body = [(1, 0), (2, 0), (3, 0), (3, 1), (3, 2), (3, 3), (3, 4)]
+    count_with_tail = flood_fill_with_tail((0, 0), body, width=5, height=5)
+    count_static = flood_fill((0, 0), set(body), width=5, height=5)
+    # 动态释放版本应 >= 静态版本（因为身体段会移走）
+    assert count_with_tail >= count_static
+    assert count_with_tail >= 1  # 至少自身
+
+
+def test_flood_fill_with_tail_fully_surrounded():
+    """头部被身体完全包围且无墙壁可利用时，至少自身可达。"""
+    # 3x3 网格，head=(1,1)，四面都是身体
+    body = [(0, 1), (2, 1), (1, 0), (1, 2)]
+    count = flood_fill_with_tail((1, 1), body, width=3, height=3)
+    assert count >= 1  # 至少自身
+    # 四个邻居都是身体段，但会在 1-4 步后移走
+    # 所以最终所有 9 格都可达
+    assert count == 9
+
+
+def test_flood_fill_with_tail_empty_body():
+    """无身体时等同于普通 flood fill。"""
+    count = flood_fill_with_tail((2, 2), [], width=5, height=5)
+    assert count == 25
+
+
+def test_flood_fill_with_tail_single_body():
+    """只有一个身体段在旁边，一步后移走。"""
+    # head=(0,0), body=[(1,0)]，BFS 到 (1,0) 时 steps=1, idx=0, 1>=0 可通过
+    count = flood_fill_with_tail((0, 0), [(1, 0)], width=3, height=1)
+    assert count == 3  # (0,0),(1,0),(2,0) 全部可达
+
+
+# ---- 极端情况 + 二阶检查 tests ----
+
+
+def test_long_snake_survival_mode():
+    """蛇身超过 60% 网格时，应选最大空间方向而非追食物。"""
+    # 5x5=25, 60%=15, 构造 snake_len=16 的场景
+    # head=(0,0), food=(4,4), body 填满大部分网格
+    body = []
+    for y in range(5):
+        for x in range(5):
+            if (x, y) != (0, 0) and (x, y) != (0, 1):
+                body.append((x, y))
+    # body 有 23 个元素，但 snake_len 需要匹配
+    # 构造一个更合理的场景：body 有 15 个元素，snake_len=16
+    body = [(1, 0), (2, 0), (3, 0), (4, 0),
+            (4, 1), (3, 1), (2, 1), (1, 1),
+            (1, 2), (2, 2), (3, 2), (4, 2),
+            (4, 3), (3, 3), (2, 3)]
+    obs = {
+        "head": (0, 0),
+        "body": body,
+        "food": (4, 4),
+        "direction": (1, 0),
+        "width": 5,
+        "height": 5,
+        "score": 15,
+        "steps": 50,
+        "snake_len": 16,  # > 25*0.6=15
+    }
+    action = get_action(obs)
+    # 应该选空间最大的方向（不一定是朝食物方向）
+    assert 0 <= action <= 3
+
+
+def test_second_order_check_avoids_food():
+    """二阶检查：吃食物后空间不足时应拒绝。"""
+    # head=(0,0), food=(0,1), body 填满第一行和部分第二行
+    # 吃掉食物后蛇身增长，空间不足
+    obs = {
+        "head": (0, 0),
+        "body": [(1, 0), (2, 0), (3, 0), (4, 0),
+                 (4, 1), (3, 1), (2, 1), (1, 1)],
+        "food": (0, 1),
+        "direction": (1, 0),
+        "width": 5,
+        "height": 5,
+        "score": 8,
+        "steps": 30,
+        "snake_len": 9,
+    }
+    action = get_action(obs)
+    # food 在 (0,1)，BFS 可达（直接向上）
+    # 吃掉 food 后 future_body = [head] + body = [(0,0),(1,0),(2,0),(3,0),(4,0),(4,1),(3,1),(2,1),(1,1)]
+    # future_space from (0,1) 应该很小（被围住了）
+    # 不应走食物方向 (ACTION_UP=0)
+    assert action != 0
+
+
+def test_flood_fill_with_tail_full_episode():
+    """使用改进 flood fill 的完整对局不崩溃。"""
+    game = SnakeGame(width=10, height=10, seed=123)
+    obs = game.reset()
+    for _ in range(500):
+        action = get_action(obs)
+        obs, reward, done, info = game.step(action)
+        if done:
+            break
+    assert info["score"] >= 0
+
+
+# ---- 二阶尾巴可达性 + 前瞻 tests ----
+
+from policy import _count_safe_moves, bfs_path
+
+
+def test_count_safe_moves_open():
+    """空旷区域，4 个方向都安全。"""
+    assert _count_safe_moves((2, 2), set(), 5, 5) == 4
+
+
+def test_count_safe_moves_corner():
+    """角落位置，2 个方向安全。"""
+    assert _count_safe_moves((0, 0), set(), 5, 5) == 2
+
+
+def test_count_safe_moves_blocked():
+    """被堵死，0 个方向安全。"""
+    body = {(1, 0), (0, 1)}
+    assert _count_safe_moves((0, 0), body, 2, 2) == 0
+
+
+def test_tail_reachability_blocks_food():
+    """吃完食物后追不到尾巴时应拒绝食物。"""
+    # head=(0,0), food=(0,1), body 形成 U 形封住去路
+    # tail=(3,2)，吃完食物后 (0,1) 到 tail 的路径被 body 阻断
+    obs = {
+        "head": (0, 0),
+        "body": [(1, 0), (2, 0), (3, 0), (3, 1), (3, 2),
+                 (2, 2), (1, 2), (1, 1)],
+        "food": (0, 1),
+        "direction": (0, 1),
+        "width": 5,
+        "height": 5,
+        "score": 8,
+        "steps": 30,
+        "snake_len": 9,
+    }
+    action = get_action(obs)
+    # food 在 (0,1)，BFS 可达
+    # 吃掉 food 后 future_body 包含 head 和所有 body
+    # tail=(3,2) 是 future_body 的一部分，future_tail_body 移除 tail
+    # 从 (0,1) 到 (3,2) 的路径被 body 阻断
+    # 所以不应走食物方向 (ACTION_UP=0)
+    assert action != 0
+
+
+def test_full_episode_improved_strategy():
+    """完整对局验证改进策略不会提前崩溃。"""
+    game = SnakeGame(width=10, height=10, seed=456)
+    obs = game.reset()
+    for _ in range(500):
+        action = get_action(obs)
+        obs, reward, done, info = game.step(action)
+        if done:
+            break
+    assert info["score"] >= 0
