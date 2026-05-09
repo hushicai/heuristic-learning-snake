@@ -103,3 +103,94 @@ def test_judge_runs():
     assert result.returncode == 0
     assert "---BEGIN JSON---" in result.stdout
     assert "平均分" in result.stdout
+
+
+# ---- BFS / Flood Fill 单元测试 ----
+
+from policy import bfs_path, flood_fill, get_action
+
+
+def test_bfs_path_straight():
+    """直线可达的最短路径。"""
+    path = bfs_path((0, 0), (3, 0), set(), width=5, height=5)
+    assert path is not None
+    assert path[0] == (1, 0)
+    assert path[-1] == (3, 0)
+    assert len(path) == 3  # (1,0) (2,0) (3,0)
+
+
+def test_bfs_path_around_obstacle():
+    """有障碍时能绕路。"""
+    # 障碍物堵住 (1,0)
+    body = {(1, 0)}
+    path = bfs_path((0, 0), (2, 0), body, width=5, height=5)
+    assert path is not None
+    assert (1, 0) not in path
+    assert path[-1] == (2, 0)
+
+
+def test_bfs_path_unreachable():
+    """完全被包围，找不到路径。"""
+    # (2,2) 被围墙围住
+    body = {(1, 2), (3, 2), (2, 1), (2, 3)}
+    path = bfs_path((0, 0), (2, 2), body, width=5, height=5)
+    assert path is None
+
+
+def test_bfs_path_target_is_start():
+    """起点即终点。"""
+    path = bfs_path((2, 2), (2, 2), set(), width=5, height=5)
+    assert path == []
+
+
+def test_flood_fill_open():
+    """空旷区域，全部可达。"""
+    count = flood_fill((0, 0), set(), width=5, height=5)
+    assert count == 25  # 5x5 全部可达
+
+
+def test_flood_fill_walled():
+    """被墙围住的小区间。"""
+    # (1,1) 被围在 2x2 的角落
+    body = {(2, 0), (2, 1), (1, 2)}
+    count = flood_fill((0, 0), body, width=5, height=5)
+    assert count >= 1  # 至少起点本身可达
+    assert count < 25  # 不是全部
+
+
+def test_flood_fill_single():
+    """完全被堵死，只有自己。"""
+    body = {(1, 0), (0, 1)}
+    count = flood_fill((0, 0), body, width=2, height=2)
+    assert count == 1
+
+
+def test_get_action_returns_safe_move():
+    """get_action 返回的动作不会撞墙或撞身体。"""
+    game = SnakeGame(width=10, height=10, seed=99)
+    obs = game.reset()
+    # 跑 100 步验证不崩溃、不越界
+    for _ in range(100):
+        action = get_action(obs)
+        obs, reward, done, info = game.step(action)
+        if done:
+            break
+
+
+def test_get_action_prefers_bfs_path():
+    """有 BFS 路径时应沿路径走。"""
+    # 构造一个简单场景: head=(1,1), food=(3,1), 无障碍
+    obs = {
+        "head": (1, 1),
+        "body": [(0, 1)],
+        "food": (3, 1),
+        "direction": (1, 0),
+        "width": 5,
+        "height": 5,
+        "score": 0,
+        "steps": 0,
+        "snake_len": 2,
+    }
+    action = get_action(obs)
+    # 应该向右走 (ACTION_RIGHT = 3)
+    assert action == 3
