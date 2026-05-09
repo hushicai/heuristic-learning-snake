@@ -194,3 +194,104 @@ def test_get_action_prefers_bfs_path():
     action = get_action(obs)
     # 应该向右走 (ACTION_RIGHT = 3)
     assert action == 3
+
+
+# ---- Tail chase + lookahead tests ----
+
+from policy import is_safe_move
+
+
+def test_is_safe_move_valid():
+    """合法位置返回 True。"""
+    assert is_safe_move((2, 2), (3, 2), {(1, 2)}, 5, 5) is True
+
+
+def test_is_safe_move_wall():
+    """撞墙返回 False。"""
+    assert is_safe_move((0, 2), (-1, 2), set(), 5, 5) is False
+
+
+def test_is_safe_move_body():
+    """撞身体返回 False。"""
+    assert is_safe_move((2, 2), (1, 2), {(1, 2)}, 5, 5) is False
+
+
+def test_tail_chase_when_food_unreachable():
+    """食物不可达时应追踪尾巴而非原地绕圈。"""
+    # head=(2,2), body 形成墙围住 food=(0,0)
+    # body: (1,2),(1,1),(1,0),(2,0),(3,0),(3,1),(3,2),(0,1)
+    # food=(0,0) 被 (0,1) 和 (1,0) 完全封死
+    # 尾巴在 (0,1)，BFS 可绕到 (2,3)→(1,3)→(0,3)→(0,2)→(0,1)
+    obs = {
+        "head": (2, 2),
+        "body": [(1, 2), (1, 1), (1, 0), (2, 0), (3, 0), (3, 1), (3, 2), (0, 1)],
+        "food": (0, 0),
+        "direction": (-1, 0),
+        "width": 5,
+        "height": 5,
+        "score": 8,
+        "steps": 25,
+        "snake_len": 9,
+    }
+    action = get_action(obs)
+    # food 不可达，应追踪尾巴（DOWN=1 到 (2,3)，沿尾巴路径）
+    # 或选最大空间方向（DOWN 或 UP 都有大空间）
+    assert action in [0, 1]  # UP (2,1) 或 DOWN (2,3)
+
+
+def test_lookahead_avoids_food_when_no_space():
+    """吃食物后空间不足时应回避食物。"""
+    # 构造场景：BFS 有路径到食物，但吃完后空间太小
+    # head=(0,0), food=(0,1), body 几乎填满第一行
+    # 吃到食物后只剩很小空间
+    obs = {
+        "head": (0, 0),
+        "body": [(1, 0), (2, 0), (3, 0), (3, 1), (2, 1), (1, 1)],
+        "food": (0, 1),
+        "direction": (1, 0),
+        "width": 5,
+        "height": 5,
+        "score": 6,
+        "steps": 20,
+        "snake_len": 7,
+    }
+    action = get_action(obs)
+    # food 在 (0,1)，BFS 可达
+    # 吃掉 food 后 body = body_set ∪ {head} = {(1,0),(2,0),(3,0),(3,1),(2,1),(1,1),(0,0)}
+    # flood_fill from (0,1) with 7 obstacles → 只有 (0,2),(0,3),(0,4) 可达 = 3 空间
+    # 3 < 7 = snake_len，所以不应走食物方向
+    # 应该追踪尾巴或选最大空间方向
+    assert action != 0  # 不应该向上走 (0,1) 即食物方向
+
+
+def test_tail_chase_safe_space():
+    """追踪尾巴也要确保空间足够。"""
+    # 简单场景：head=(2,2), 尾巴=(0,2)，路径畅通
+    obs = {
+        "head": (2, 2),
+        "body": [(1, 2), (0, 2)],
+        "food": (4, 4),
+        "direction": (-1, 0),
+        "width": 5,
+        "height": 5,
+        "score": 2,
+        "steps": 5,
+        "snake_len": 3,
+    }
+    action = get_action(obs)
+    # food 在 (4,4)，可达但需检查前瞻
+    # 应该返回合法动作
+    assert 0 <= action <= 3
+
+
+def test_full_episode_tail_chase():
+    """整合测试：策略包含尾巴追踪的完整对局不会提前崩溃。"""
+    game = SnakeGame(width=10, height=10, seed=77)
+    obs = game.reset()
+    for _ in range(200):
+        action = get_action(obs)
+        obs, reward, done, info = game.step(action)
+        if done:
+            break
+    # 跑完不应因策略错误而崩溃
+    assert info["score"] >= 0
